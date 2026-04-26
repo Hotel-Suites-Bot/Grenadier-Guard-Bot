@@ -13,7 +13,7 @@ const {
 const axios = require('axios');
 
 // ================= CONFIG =================
-const TOKEN = "MTQ5NzgyODE2MTIzNTQ1NjA0MA.GNvHJg.Tgbx6vr4AtBpcFis5IYQER3csPoreqU_58mBi4" // set in Wispbyte env
+const TOKEN = process.env.TOKEN // set in Wispbyte env
 const CLIENT_ID = "1497828161235456040";
 const GUILD_ID = "1486075194979127496";
 
