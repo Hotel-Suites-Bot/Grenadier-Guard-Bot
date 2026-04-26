@@ -23,7 +23,7 @@ const LOG_CHANNEL_ID = "1486075197306962206";
 const EVENT_ROLE_ID = "1486075194979127503";
 const STAFF_ROLE_ID = "1486075194979127499";
 
-const ROBLOX_LINK = "https://www.roblox.com/games/3295514368/British-Army
+const ROBLOX_LINK = "https://www.roblox.com/games/3295514368";
 
 let activeEvent = null;
 
