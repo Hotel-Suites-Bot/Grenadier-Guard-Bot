@@ -17,40 +17,72 @@ const TOKEN = process.env.TOKEN;
 const CLIENT_ID = "1497828161235456040";
 const GUILD_ID = "1486075194979127496";
 
+// BGC
 const REQUIRED_ROLE_ID = "1486075194979127499";
-
 const BLACKLISTED_GROUPS = [32366337];
 const MAIN_GROUP_ID = 35365203;
+
+// EVENT SYSTEM
+const EVENT_STAFF_ROLE = "1486075194979127499";
+const EVENT_PING_ROLE = "1486075194979127503";
+const EVENT_POST_CHANNEL = "1486075196178956402";
+const EVENT_LOG_CHANNEL = "1486075197143519429";
+const ROBLOX_GAME_LINK = "https://www.roblox.com/games/3295514368/British-Army";
 // ==========================================
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-// ================= REGISTER COMMAND =================
+// store active events
+const activeEvents = new Map();
+
+// ================= COMMANDS =================
 const commands = [
   new SlashCommandBuilder()
     .setName("bgc")
     .setDescription("Run a Roblox background check")
     .addStringOption(option =>
-      option.setName("username")
-        .setDescription("Roblox username")
-        .setRequired(true)
+      option.setName("username").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("event")
+    .setDescription("Event system")
+    .addSubcommand(sub =>
+      sub.setName("host")
+        .addUserOption(o => o.setName("host").setRequired(true))
+        .addUserOption(o => o.setName("cohost"))
+        .addStringOption(o => o.setName("name").setRequired(true))
+        .addStringOption(o =>
+          o.setName("type")
+            .setRequired(true)
+            .addChoices(
+              { name: "Tryout", value: "Tryout" },
+              { name: "Training", value: "Training" }
+            )
+        )
+    )
+    .addSubcommand(sub => sub.setName("start"))
+    .addSubcommand(sub =>
+      sub.setName("end")
+        .addUserOption(o => o.setName("host").setRequired(true))
+        .addUserOption(o => o.setName("cohost"))
+        .addStringOption(o => o.setName("name").setRequired(true))
+        .addIntegerOption(o => o.setName("attendees").setRequired(true))
+        .addIntegerOption(o => o.setName("passed").setRequired(true))
+        .addIntegerOption(o => o.setName("failed").setRequired(true))
+        .addAttachmentOption(o => o.setName("proof").setRequired(true))
     )
 ];
 
 const rest = new REST({ version: "10" }).setToken(TOKEN);
 
 (async () => {
-  try {
-    await rest.put(
-      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-      { body: commands }
-    );
-    console.log("Slash command registered.");
-  } catch (err) {
-    console.error(err);
-  }
+  await rest.put(
+    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+    { body: commands }
+  );
 })();
 
 // ================= READY =================
@@ -58,29 +90,23 @@ client.once("ready", () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
-// ================= COMMAND =================
+// ================= INTERACTIONS =================
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
+  // ================= BGC =================
   if (interaction.commandName === "bgc") {
 
-    // 🔐 ROLE CHECK
     if (!interaction.member.roles.cache.has(REQUIRED_ROLE_ID)) {
-      return interaction.reply({
-        content: "❌ You do not have permission to use this.",
-        ephemeral: true
-      });
+      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
     }
 
     const username = interaction.options.getString("username");
-
     await interaction.deferReply();
 
     try {
-      // USER ID
       const userRes = await axios.post("https://users.roblox.com/v1/usernames/users", {
-        usernames: [username],
-        excludeBannedUsers: false
+        usernames: [username]
       });
 
       const user = userRes.data.data[0];
@@ -88,166 +114,140 @@ client.on("interactionCreate", async (interaction) => {
 
       const userId = user.id;
 
-      // USER INFO
       const userInfo = await axios.get(`https://users.roblox.com/v1/users/${userId}`);
       const created = new Date(userInfo.data.created);
-      const ageDays = Math.floor((Date.now() - created) / (1000 * 60 * 60 * 24));
+      const ageDays = Math.floor((Date.now() - created) / 86400000);
 
-      // AVATAR
-      const avatarRes = await axios.get(
-        `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png`
-      );
-      const avatar = avatarRes.data.data[0].imageUrl;
-
-      // GROUPS
-      const groupsRes = await axios.get(
-        `https://groups.roblox.com/v2/users/${userId}/groups/roles`
-      );
+      const groupsRes = await axios.get(`https://groups.roblox.com/v2/users/${userId}/groups/roles`);
       const groups = groupsRes.data.data;
 
-      // FRIENDS
-      const friendsRes = await axios.get(
-        `https://friends.roblox.com/v1/users/${userId}/friends/count`
-      );
-      const friendsCount = friendsRes.data.count;
-
-      // BADGES
-      const badgesRes = await axios.get(
-        `https://badges.roblox.com/v1/users/${userId}/badges?limit=100`
-      );
-      const badgeCount = badgesRes.data.data.length;
-
-      // ================= FLAGS =================
       let redFlag = false;
       let flaggedGroup = null;
-      let flaggedGroupId = null;
 
       for (let g of groups) {
         if (BLACKLISTED_GROUPS.includes(g.group.id)) {
           redFlag = true;
           flaggedGroup = g.group.name;
-          flaggedGroupId = g.group.id;
           break;
         }
       }
 
-      let orangeFlags = [];
+      let status = redFlag
+        ? `🔴 RED FLAG\nBlacklisted Group: ${flaggedGroup}`
+        : ageDays < 60
+        ? `🟠 ORANGE FLAG\nAccount under 60 days`
+        : `🟢 GREEN FLAG\nAll clear`;
 
-      if (ageDays < 60) orangeFlags.push("Account under 60 days");
-      if (badgeCount < 10) orangeFlags.push("Low badge count");
-      if (friendsCount < 10) orangeFlags.push("Low friend count");
-
-      const inMainGroup = groups.some(g => g.group.id === MAIN_GROUP_ID);
-      if (!inMainGroup) orangeFlags.push("Not in main group");
-
-      let statusText = "";
-      let color = 0x00ff00;
-
-      if (redFlag) {
-        statusText = `🔴 RED FLAG
-User is in blacklisted group:
-${flaggedGroup}`;
-        color = 0xff0000;
-      } else if (orangeFlags.length > 0) {
-        statusText = `🟠 ORANGE FLAG
-${orangeFlags.map(x => `- ${x}`).join("\n")}`;
-        color = 0xffa500;
-      } else {
-        statusText = `🟢 GREEN FLAG
-User is all clear`;
-        color = 0x00ff00;
-      }
-
-      // ================= PAGINATION =================
-      const pageSize = 8;
-      const pages = [];
-
-      for (let i = 0; i < groups.length; i += pageSize) {
-        const chunk = groups.slice(i, i + pageSize);
-
-        pages.push(
-          chunk.map(g => `- ${g.group.name} (Rank: ${g.role.name})`).join("\n")
+      const embed = new EmbedBuilder()
+        .setTitle("🪖 BACKGROUND CHECK")
+        .setColor(redFlag ? 0xff0000 : 0x00ff00)
+        .addFields(
+          { name: "User", value: username, inline: true },
+          { name: "Account Age", value: `${ageDays} days`, inline: true },
+          { name: "Status", value: status }
         );
-      }
 
-      let currentPage = 0;
+      interaction.editReply({ embeds: [embed] });
 
-      const generateEmbed = (page) => {
-        return new EmbedBuilder()
-          .setTitle("🪖 Military Background Check")
-          .setColor(color)
-          .setThumbnail(avatar)
-          .addFields(
-            { name: "Username", value: username, inline: true },
-            { name: "Account Age", value: `${ageDays} days`, inline: true },
-            { name: "Friends", value: `${friendsCount}`, inline: true },
-            { name: "Badges", value: `${badgeCount}`, inline: true },
-            { name: "Status", value: statusText },
-            { name: `Groups (${page + 1}/${pages.length})`, value: pages[page] || "None" }
-          )
-          .setFooter({ text: "British Army Verification System" })
-          .setURL(`https://www.roblox.com/users/${userId}/profile`);
-      };
+    } catch {
+      interaction.editReply("Error fetching data.");
+    }
+  }
 
-      // ================= BUTTONS =================
+  // ================= EVENT SYSTEM =================
+  if (interaction.commandName === "event") {
+
+    if (!interaction.member.roles.cache.has(EVENT_STAFF_ROLE)) {
+      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+    }
+
+    const sub = interaction.options.getSubcommand();
+
+    // ===== HOST =====
+    if (sub === "host") {
+
+      const host = interaction.options.getUser("host");
+      const cohost = interaction.options.getUser("cohost");
+      const name = interaction.options.getString("name");
+      const type = interaction.options.getString("type");
+
+      const embed = new EmbedBuilder()
+        .setTitle("🪖 EVENT")
+        .setColor(0x2b2d31)
+        .setDescription(`**${name}**`)
+        .addFields(
+          { name: "HOST(s)", value: `Host: <@${host.id}>\nCo-Host: ${cohost ? `<@${cohost.id}>` : "None"}` },
+          { name: "TYPE", value: type, inline: true },
+          { name: "STATUS", value: "🟢 OPEN", inline: true }
+        )
+        .setFooter({ text: "British Army Event Panel" });
+
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setCustomId("prev")
-          .setLabel("⬅️")
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId("next")
-          .setLabel("➡️")
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setLabel("View Profile")
+          .setLabel("Join Operation")
           .setStyle(ButtonStyle.Link)
-          .setURL(`https://www.roblox.com/users/${userId}/profile`)
+          .setURL(ROBLOX_GAME_LINK)
       );
 
-      if (redFlag) {
-        row.addComponents(
-          new ButtonBuilder()
-            .setLabel("Flagged Group")
-            .setStyle(ButtonStyle.Link)
-            .setURL(`https://www.roblox.com/groups/${flaggedGroupId}`)
-        );
+      const postChannel = interaction.client.channels.cache.get(EVENT_POST_CHANNEL);
+      if (!postChannel) {
+        return interaction.reply({ content: "❌ Event post channel not found.", ephemeral: true });
       }
 
-      const msg = await interaction.editReply({
-        embeds: [generateEmbed(currentPage)],
+      const msg = await postChannel.send({
+        content: `<@&${EVENT_PING_ROLE}>`,
+        embeds: [embed],
         components: [row]
       });
 
-      if (pages.length <= 1) return;
+      activeEvents.set(interaction.guild.id, msg.id);
 
-      const collector = msg.createMessageComponentCollector({
-        time: 60000
-      });
+      interaction.reply({ content: "✅ Event posted.", ephemeral: true });
+    }
 
-      collector.on("collect", async (i) => {
-        if (i.user.id !== interaction.user.id) {
-          return i.reply({ content: "Not your menu.", ephemeral: true });
-        }
+    // ===== START =====
+    if (sub === "start") {
 
-        if (i.customId === "next") {
-          currentPage = (currentPage + 1) % pages.length;
-        } else if (i.customId === "prev") {
-          currentPage = (currentPage - 1 + pages.length) % pages.length;
-        }
+      const msgId = activeEvents.get(interaction.guild.id);
+      if (!msgId) {
+        return interaction.reply({ content: "❌ No active event.", ephemeral: true });
+      }
 
-        await i.update({
-          embeds: [generateEmbed(currentPage)]
-        });
-      });
+      const postChannel = interaction.client.channels.cache.get(EVENT_POST_CHANNEL);
+      const msg = await postChannel.messages.fetch(msgId);
 
-      collector.on("end", () => {
-        interaction.editReply({ components: [] });
-      });
+      const embed = EmbedBuilder.from(msg.embeds[0]);
+      embed.spliceFields(2, 1, { name: "STATUS", value: "🔴 LOCKED", inline: true });
 
-    } catch (err) {
-      console.error(err);
-      interaction.editReply("Error fetching Roblox data.");
+      await msg.edit({ embeds: [embed] });
+
+      interaction.reply({ content: "🔒 Event locked.", ephemeral: true });
+    }
+
+    // ===== END =====
+    if (sub === "end") {
+
+      const proof = interaction.options.getAttachment("proof");
+
+      const embed = new EmbedBuilder()
+        .setTitle("📊 EVENT COMPLETE")
+        .setColor(0xff0000)
+        .addFields(
+          { name: "Attendees", value: `${interaction.options.getInteger("attendees")}`, inline: true },
+          { name: "Passed", value: `${interaction.options.getInteger("passed")}`, inline: true },
+          { name: "Failed", value: `${interaction.options.getInteger("failed")}`, inline: true }
+        )
+        .setImage(proof.url)
+        .setFooter({ text: "British Army Event Logs" });
+
+      const logChannel = interaction.client.channels.cache.get(EVENT_LOG_CHANNEL);
+      if (logChannel) {
+        logChannel.send({ embeds: [embed] });
+      }
+
+      activeEvents.delete(interaction.guild.id);
+
+      interaction.reply({ content: "📁 Event logged.", ephemeral: true });
     }
   }
 });
