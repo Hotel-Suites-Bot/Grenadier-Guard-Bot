@@ -19,7 +19,7 @@ const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const REQUIRED_ROLE_ID = process.env.REQUIRED_ROLE_ID;
 
 // ================= CONFIG =================
-const BLACKLISTED_GROUPS = [];
+const BLACKLISTED_GROUPS = [1];
 const MAIN_GROUP_ID = 35365203;
 
 const MIN_ACCOUNT_AGE = 60;
@@ -41,6 +41,15 @@ let activeEvent = null;
     }
 });
 
+// ================= TIMEOUT =================
+const timeout = (promise, ms = 10000) =>
+    Promise.race([
+        promise,
+        new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("Timeout")), ms)
+        )
+    ]);
+
 // ================= READY =================
 client.once("ready", async () => {
     console.log(`${client.user.tag} online`);
@@ -61,54 +70,21 @@ client.once("ready", async () => {
             .addSubcommand(s =>
                 s.setName("host")
                     .setDescription("Host event")
-                    .addStringOption(o =>
-                        o.setName("eventname")
-                            .setDescription("Event name")
-                            .setRequired(true)
-                    )
-                    .addStringOption(o =>
-                        o.setName("cohost")
-                            .setDescription("Co-host name")
-                            .setRequired(true)
-                    )
-                    .addStringOption(o =>
-                        o.setName("rules")
-                            .setDescription("Event rules")
-                            .setRequired(true)
-                    )
-                    .addStringOption(o =>
-                        o.setName("invite")
-                            .setDescription("Game invite link")
-                            .setRequired(true)
-                    )
+                    .addStringOption(o => o.setName("eventname").setRequired(true))
+                    .addStringOption(o => o.setName("cohost").setRequired(true))
+                    .addStringOption(o => o.setName("rules").setRequired(true))
+                    .addStringOption(o => o.setName("invite").setRequired(true))
             )
             .addSubcommand(s =>
-                s.setName("start")
-                    .setDescription("Lock event")
+                s.setName("start").setDescription("Lock event")
             )
             .addSubcommand(s =>
                 s.setName("end")
                     .setDescription("End event")
-                    .addIntegerOption(o =>
-                        o.setName("attendees")
-                            .setDescription("Number of attendees")
-                            .setRequired(true)
-                    )
-                    .addStringOption(o =>
-                        o.setName("passers")
-                            .setDescription("Who passed")
-                            .setRequired(true)
-                    )
-                    .addIntegerOption(o =>
-                        o.setName("failed")
-                            .setDescription("Number failed")
-                            .setRequired(true)
-                    )
-                    .addAttachmentOption(o =>
-                        o.setName("proof")
-                            .setDescription("Proof image")
-                            .setRequired(true)
-                    )
+                    .addIntegerOption(o => o.setName("attendees").setRequired(true))
+                    .addStringOption(o => o.setName("passers").setRequired(true))
+                    .addIntegerOption(o => o.setName("failed").setRequired(true))
+                    .addAttachmentOption(o => o.setName("proof").setRequired(true))
             )
     ].map(c => c.toJSON());
 
@@ -126,7 +102,6 @@ client.once("ready", async () => {
 client.on("interactionCreate", async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
-    // ROLE CHECK
     if (!interaction.member.roles.cache.has(REQUIRED_ROLE_ID)) {
         return interaction.reply({
             content: "❌ No permission.",
@@ -144,18 +119,18 @@ client.on("interactionCreate", async interaction => {
         });
 
         try {
-            const timeout = (p, ms = 8000) =>
-                Promise.race([
-                    p,
-                    new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error("Timeout")), ms)
-                    )
-                ]);
-
             const userId = await timeout(noblox.getIdFromUsername(username));
             const userInfo = await timeout(noblox.getPlayerInfo(userId));
             const groups = await timeout(noblox.getGroups(userId));
-            const friends = await timeout(noblox.getFriends(userId));
+
+            // FIXED FRIENDS HANDLING (no crash)
+            let friends = [];
+            try {
+                const f = await timeout(noblox.getFriends(userId), 12000);
+                friends = Array.isArray(f) ? f : (f?.data || []);
+            } catch {
+                friends = [];
+            }
 
             const ageDays = Math.floor(
                 (Date.now() - new Date(userInfo.created)) / 86400000
@@ -173,28 +148,26 @@ client.on("interactionCreate", async interaction => {
             let color = 0x00ff00;
 
             if (blacklisted) {
-                flags.push(`🔴 RED FLAG: Blacklisted group (${blacklisted.Name})`);
+                flags.push(`🔴 Blacklisted group (${blacklisted.Name})`);
                 color = 0xff0000;
             }
 
             if (ageDays < MIN_ACCOUNT_AGE) {
-                flags.push(`🟠 ORANGE: Account under ${MIN_ACCOUNT_AGE} days`);
+                flags.push(`🟠 Account under ${MIN_ACCOUNT_AGE} days`);
                 color = 0xffa500;
             }
 
             if (!inMain) {
-                flags.push(`🟠 ORANGE: Not in main group`);
+                flags.push(`🟠 Not in main group`);
                 color = 0xffa500;
             }
 
             if (friends.length < MIN_FRIENDS) {
-                flags.push(`🟠 ORANGE: Low friends (${friends.length})`);
+                flags.push(`🟠 Low friends (${friends.length})`);
                 color = 0xffa500;
             }
 
-            if (flags.length === 0) {
-                flags.push("🟢 GREEN: ALL CLEAR");
-            }
+            if (flags.length === 0) flags.push("🟢 ALL CLEAR");
 
             const embed = new EmbedBuilder()
                 .setTitle("MILITARY BACKGROUND CHECK")
@@ -204,14 +177,8 @@ client.on("interactionCreate", async interaction => {
                     { name: "User ID", value: `${userId}`, inline: true },
                     { name: "Account Age", value: `${ageDays} days`, inline: true },
                     { name: "Friends", value: `${friends.length}`, inline: true },
-                    {
-                        name: "Profile",
-                        value: `https://www.roblox.com/users/${userId}/profile`
-                    },
-                    {
-                        name: "FLAGS",
-                        value: flags.join("\n")
-                    }
+                    { name: "Profile", value: `https://www.roblox.com/users/${userId}/profile` },
+                    { name: "FLAGS", value: flags.join("\n") }
                 )
                 .setTimestamp();
 
@@ -219,9 +186,8 @@ client.on("interactionCreate", async interaction => {
 
         } catch (err) {
             console.error(err);
-
             await interaction.editReply({
-                content: "❌ BGC failed (timeout / invalid user / Roblox error)."
+                content: "❌ BGC failed."
             });
         }
     }
@@ -234,11 +200,14 @@ client.on("interactionCreate", async interaction => {
         if (sub === "host") {
             const channel = interaction.guild.channels.cache.get(EVENT_CHANNEL_ID);
 
+            const host = interaction.user;
+            const cohost = interaction.options.getString("cohost");
+
             const embed = new EmbedBuilder()
                 .setTitle("MILITARY EVENT")
                 .addFields(
-                    { name: "Host", value: `${interaction.user}` },
-                    { name: "Cohost", value: interaction.options.getString("cohost") },
+                    { name: "Host", value: `<@${host.id}>` },
+                    { name: "Cohost", value: cohost },
                     { name: "Event Name", value: interaction.options.getString("eventname") },
                     { name: "Rules", value: interaction.options.getString("rules") },
                     { name: "Locking In", value: "🟢 OPEN" },
@@ -251,8 +220,8 @@ client.on("interactionCreate", async interaction => {
             activeEvent = {
                 id: msg.id,
                 channel: channel.id,
-                host: interaction.user.tag,
-                cohost: interaction.options.getString("cohost"),
+                hostId: host.id,
+                cohostRaw: cohost,
                 name: interaction.options.getString("eventname")
             };
 
@@ -293,8 +262,8 @@ client.on("interactionCreate", async interaction => {
             const embed = new EmbedBuilder()
                 .setTitle("EVENT LOG")
                 .addFields(
-                    { name: "Host", value: activeEvent.host, inline: true },
-                    { name: "Cohost", value: activeEvent.cohost, inline: true },
+                    { name: "Host", value: `<@${activeEvent.hostId}>`, inline: true },
+                    { name: "Cohost", value: activeEvent.cohostRaw, inline: true },
                     { name: "Event Name", value: activeEvent.name },
                     { name: "Attendees", value: `${interaction.options.getInteger("attendees")}`, inline: true },
                     { name: "Passers", value: interaction.options.getString("passers") },
