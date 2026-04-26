@@ -161,9 +161,152 @@ client.on("interactionCreate", async (interaction) => {
 
       let currentPage = 0;
 
+// ==========================================
+
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds]
+});
+
+// ================= REGISTER COMMAND =================
+const commands = [
+  new SlashCommandBuilder()
+    .setName("bgc")
+    .setDescription("Run a Roblox background check")
+    .addStringOption(option =>
+      option.setName("username")
+        .setDescription("Roblox username")
+        .setRequired(true)
+    )
+];
+
+const rest = new REST({ version: "10" }).setToken(TOKEN);
+
+(async () => {
+  try {
+    await rest.put(
+      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+      { body: commands }
+    );
+    console.log("Slash command registered.");
+  } catch (err) {
+    console.error(err);
+  }
+})();
+
+// ================= READY =================
+client.once("ready", () => {
+  console.log(`Logged in as ${client.user.tag}`);
+});
+
+// ================= COMMAND =================
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.commandName === "bgc") {
+
+    // 🔐 ROLE CHECK
+    if (!interaction.member.roles.cache.has(REQUIRED_ROLE_ID)) {
+      return interaction.reply({
+        content: "❌ You do not have permission to use this.",
+        ephemeral: true
+      });
+    }
+
+    const username = interaction.options.getString("username");
+
+    await interaction.deferReply();
+
+    try {
+      // USER ID
+      const userRes = await axios.post("https://users.roblox.com/v1/usernames/users", {
+        usernames: [username],
+        excludeBannedUsers: false
+      });
+
+      const user = userRes.data.data[0];
+      if (!user) return interaction.editReply("User not found.");
+
+      const userId = user.id;
+
+      // USER INFO
+      const userInfo = await axios.get(`https://users.roblox.com/v1/users/${userId}`);
+      const created = new Date(userInfo.data.created);
+      const ageDays = Math.floor((Date.now() - created) / (1000 * 60 * 60 * 24));
+
+      // AVATAR
+      const avatarRes = await axios.get(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png`);
+      const avatar = avatarRes.data.data[0].imageUrl;
+
+      // GROUPS
+      const groupsRes = await axios.get(`https://groups.roblox.com/v2/users/${userId}/groups/roles`);
+      const groups = groupsRes.data.data;
+
+      // FRIENDS
+      const friendsRes = await axios.get(`https://friends.roblox.com/v1/users/${userId}/friends/count`);
+      const friendsCount = friendsRes.data.count;
+
+      // BADGES
+      const badgesRes = await axios.get(`https://badges.roblox.com/v1/users/${userId}/badges?limit=100`);
+      const badgeCount = badgesRes.data.data.length;
+
+      // ================= FLAGS =================
+      let redFlag = false;
+      let flaggedGroup = null;
+      let flaggedGroupId = null;
+
+      for (let g of groups) {
+        if (BLACKLISTED_GROUPS.includes(g.group.id)) {
+          redFlag = true;
+          flaggedGroup = g.group.name;
+          flaggedGroupId = g.group.id;
+          break;
+        }
+      }
+
+      let orangeFlags = [];
+
+      if (ageDays < 60) orangeFlags.push("Account under 60 days");
+      if (badgeCount < 10) orangeFlags.push("Low badge count");
+      if (friendsCount < 10) orangeFlags.push("Low friend count");
+
+      const inMainGroup = groups.some(g => g.group.id === MAIN_GROUP_ID);
+      if (!inMainGroup) orangeFlags.push("Not in main group");
+
+      let statusText = "";
+      let color = 0x00ff00;
+
+      if (redFlag) {
+        statusText = `🔴 RED FLAG
+User is in blacklisted group:
+${flaggedGroup}`;
+        color = 0xff0000;
+      } else if (orangeFlags.length > 0) {
+        statusText = `🟠 ORANGE FLAG
+${orangeFlags.map(x => `- ${x}`).join("\n")}`;
+        color = 0xffa500;
+      } else {
+        statusText = `🟢 GREEN FLAG
+User is all clear`;
+        color = 0x00ff00;
+      }
+
+      // ================= PAGINATION =================
+      const pageSize = 8;
+      const pages = [];
+
+      for (let i = 0; i < groups.length; i += pageSize) {
+        const chunk = groups.slice(i, i + pageSize);
+
+        pages.push(
+          chunk.map(g => `${g.group.name}\nRank: ${g.role.name}`).join("\n\n")
+        );
+      }
+
+      let currentPage = 0;
+
       const generateEmbed = (page) => {
         return new EmbedBuilder()
-          .setTitle("ðŸª– Military Background Check")
+          .setTitle("🪖 Military Background Check")
           .setColor(color)
           .setThumbnail(avatar)
           .addFields(
@@ -172,7 +315,7 @@ client.on("interactionCreate", async (interaction) => {
             { name: "Friends", value: `${friendsCount}`, inline: true },
             { name: "Badges", value: `${badgeCount}`, inline: true },
             { name: "Status", value: statusText },
-            { name: `Groups [${page + 1}/${pages.length}]`, value: pages[page] || "None" }
+            { name: `Groups (${page + 1}/${pages.length})`, value: pages[page] || "None" }
           )
           .setFooter({ text: "British Army Verification System" })
           .setURL(`https://www.roblox.com/users/${userId}/profile`);
@@ -182,11 +325,11 @@ client.on("interactionCreate", async (interaction) => {
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId("prev")
-          .setLabel("â¬…ï¸")
+          .setLabel("⬅️")
           .setStyle(ButtonStyle.Primary),
         new ButtonBuilder()
           .setCustomId("next")
-          .setLabel("âž¡ï¸")
+          .setLabel("➡️")
           .setStyle(ButtonStyle.Primary),
         new ButtonBuilder()
           .setLabel("View Profile")
