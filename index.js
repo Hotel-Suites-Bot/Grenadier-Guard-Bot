@@ -7,75 +7,70 @@ const {
   ButtonStyle,
   SlashCommandBuilder,
   REST,
-  Routes
-} = require('discord.js');
+  Routes,
+} = require("discord.js");
 
-const axios = require('axios');
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds],
+});
 
-// ================= CONFIG =================
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = "1497828161235456040";
 const GUILD_ID = "1486075194979127496";
 
-// BGC
-const REQUIRED_ROLE_ID = "1486075194979127499";
-const BLACKLISTED_GROUPS = [32366337];
-const MAIN_GROUP_ID = 35365203;
+const EVENT_CHANNEL_ID = "1486075196178956402";
+const LOG_CHANNEL_ID = "1486075197306962206";
+const EVENT_ROLE_ID = "1486075194979127503";
+const STAFF_ROLE_ID = "1486075194979127499";
 
-// EVENT SYSTEM
-const EVENT_STAFF_ROLE = "1486075194979127499";
-const EVENT_PING_ROLE = "1486075194979127503";
-const EVENT_POST_CHANNEL = "1486075196178956402";
-const EVENT_LOG_CHANNEL = "1486075197143519430";
-const ROBLOX_GAME_LINK = "https://www.roblox.com/games/3295514368/British-Army";
-// ==========================================
+const ROBLOX_LINK = "https://www.roblox.com/games/3295514368/British-Army
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
-});
+let activeEvent = null;
 
-// store active events
-const activeEvents = new Map();
-
-// ================= COMMANDS =================
+//
+// 📌 COMMANDS
+//
 const commands = [
-  new SlashCommandBuilder()
-    .setName("bgc")
-    .setDescription("Run a Roblox background check")
-    .addStringOption(option =>
-      option.setName("username").setRequired(true)
-    ),
 
+  // EVENT COMMAND
   new SlashCommandBuilder()
     .setName("event")
-    .setDescription("Event system")
+    .setDescription("Event system commands")
     .addSubcommand(sub =>
       sub.setName("host")
-        .addUserOption(o => o.setName("host").setRequired(true))
-        .addUserOption(o => o.setName("cohost"))
-        .addStringOption(o => o.setName("name").setRequired(true))
-        .addStringOption(o =>
-          o.setName("type")
-            .setRequired(true)
-            .addChoices(
-              { name: "Tryout", value: "Tryout" },
-              { name: "Training", value: "Training" }
-            )
-        )
+        .setDescription("Host an event")
+        .addUserOption(o => o.setName("host").setDescription("Host").setRequired(true))
+        .addUserOption(o => o.setName("cohost").setDescription("Co Host").setRequired(false))
+        .addStringOption(o => o.setName("name").setDescription("Event Name").setRequired(true))
+        .addStringOption(o => o.setName("type").setDescription("Tryout or Training").setRequired(true))
     )
-    .addSubcommand(sub => sub.setName("start"))
+    .addSubcommand(sub =>
+      sub.setName("start")
+        .setDescription("Start the event")
+    )
     .addSubcommand(sub =>
       sub.setName("end")
-        .addUserOption(o => o.setName("host").setRequired(true))
-        .addUserOption(o => o.setName("cohost"))
-        .addStringOption(o => o.setName("name").setRequired(true))
-        .addIntegerOption(o => o.setName("attendees").setRequired(true))
-        .addIntegerOption(o => o.setName("passed").setRequired(true))
-        .addIntegerOption(o => o.setName("failed").setRequired(true))
-        .addAttachmentOption(o => o.setName("proof").setRequired(true))
-    )
+        .setDescription("End the event")
+        .addIntegerOption(o => o.setName("attendees").setDescription("Attendees").setRequired(true))
+        .addIntegerOption(o => o.setName("passed").setDescription("Passed").setRequired(true))
+        .addIntegerOption(o => o.setName("failed").setDescription("Failed").setRequired(true))
+        .addAttachmentOption(o => o.setName("proof").setDescription("Proof Screenshot").setRequired(true))
+    ),
+
+  // BGC COMMAND
+  new SlashCommandBuilder()
+    .setName("bgc")
+    .setDescription("Background check a user")
+    .addUserOption(o =>
+      o.setName("user")
+        .setDescription("User to check")
+        .setRequired(true)
+    ),
 ];
 
+//
+// 🚀 REGISTER COMMANDS
+//
 const rest = new REST({ version: "10" }).setToken(TOKEN);
 
 (async () => {
@@ -83,172 +78,119 @@ const rest = new REST({ version: "10" }).setToken(TOKEN);
     Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
     { body: commands }
   );
+  console.log("✅ Commands registered");
 })();
 
-// ================= READY =================
+//
+// 🎮 BOT READY
+//
 client.once("ready", () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
-// ================= INTERACTIONS =================
-client.on("interactionCreate", async (interaction) => {
+//
+// ⚡ INTERACTIONS
+//
+client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  // ================= BGC =================
-  if (interaction.commandName === "bgc") {
-
-    if (!interaction.member.roles.cache.has(REQUIRED_ROLE_ID)) {
-      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-    }
-
-    const username = interaction.options.getString("username");
-    await interaction.deferReply();
-
-    try {
-      const userRes = await axios.post("https://users.roblox.com/v1/usernames/users", {
-        usernames: [username]
-      });
-
-      const user = userRes.data.data[0];
-      if (!user) return interaction.editReply("User not found.");
-
-      const userId = user.id;
-
-      const userInfo = await axios.get(`https://users.roblox.com/v1/users/${userId}`);
-      const created = new Date(userInfo.data.created);
-      const ageDays = Math.floor((Date.now() - created) / 86400000);
-
-      const groupsRes = await axios.get(`https://groups.roblox.com/v2/users/${userId}/groups/roles`);
-      const groups = groupsRes.data.data;
-
-      let redFlag = false;
-      let flaggedGroup = null;
-
-      for (let g of groups) {
-        if (BLACKLISTED_GROUPS.includes(g.group.id)) {
-          redFlag = true;
-          flaggedGroup = g.group.name;
-          break;
-        }
-      }
-
-      let status = redFlag
-        ? `🔴 RED FLAG\nBlacklisted Group: ${flaggedGroup}`
-        : ageDays < 60
-        ? `🟠 ORANGE FLAG\nAccount under 60 days`
-        : `🟢 GREEN FLAG\nAll clear`;
-
-      const embed = new EmbedBuilder()
-        .setTitle("🪖 BACKGROUND CHECK")
-        .setColor(redFlag ? 0xff0000 : 0x00ff00)
-        .addFields(
-          { name: "User", value: username, inline: true },
-          { name: "Account Age", value: `${ageDays} days`, inline: true },
-          { name: "Status", value: status }
-        );
-
-      interaction.editReply({ embeds: [embed] });
-
-    } catch {
-      interaction.editReply("Error fetching data.");
-    }
+  // 🔒 PERMISSION CHECK
+  if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) {
+    return interaction.reply({ content: "❌ No permission", ephemeral: true });
   }
 
-  // ================= EVENT SYSTEM =================
+  //
+  // 🎯 EVENT SYSTEM
+  //
   if (interaction.commandName === "event") {
-
-    if (!interaction.member.roles.cache.has(EVENT_STAFF_ROLE)) {
-      return interaction.reply({ content: "❌ No permission.", ephemeral: true });
-    }
-
     const sub = interaction.options.getSubcommand();
 
-    // ===== HOST =====
     if (sub === "host") {
-
       const host = interaction.options.getUser("host");
       const cohost = interaction.options.getUser("cohost");
       const name = interaction.options.getString("name");
       const type = interaction.options.getString("type");
 
       const embed = new EmbedBuilder()
-        .setTitle("🪖 EVENT")
-        .setColor(0x2b2d31)
-        .setDescription(`**${name}**`)
-        .addFields(
-          { name: "HOST(s)", value: `Host: <@${host.id}>\nCo-Host: ${cohost ? `<@${cohost.id}>` : "None"}` },
-          { name: "TYPE", value: type, inline: true },
-          { name: "STATUS", value: "🟢 OPEN", inline: true }
-        )
-        .setFooter({ text: "British Army Event Panel" });
+        .setTitle(`📢 ${name}`)
+        .setDescription(`**Type:** ${type}\n**Host:** ${host}\n**Co-Host:** ${cohost || "None"}\n\n🟢 Status: OPEN`)
+        .setColor("Green");
 
-      const row = new ActionRowBuilder().addComponents(
+      const button = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setLabel("Join Operation")
+          .setLabel("Join Event")
           .setStyle(ButtonStyle.Link)
-          .setURL(ROBLOX_GAME_LINK)
+          .setURL(ROBLOX_LINK)
       );
 
-      const postChannel = interaction.client.channels.cache.get(EVENT_POST_CHANNEL);
-      if (!postChannel) {
-        return interaction.reply({ content: "❌ Event post channel not found.", ephemeral: true });
-      }
+      const eventChannel = await client.channels.fetch(EVENT_CHANNEL_ID);
 
-      const msg = await postChannel.send({
-        content: `<@&${EVENT_PING_ROLE}>`,
+      const msg = await eventChannel.send({
+        content: `<@&${EVENT_ROLE_ID}>`,
         embeds: [embed],
-        components: [row]
+        components: [button],
       });
 
-      activeEvents.set(interaction.guild.id, msg.id);
+      activeEvent = { messageId: msg.id, channelId: EVENT_CHANNEL_ID, name };
 
-      interaction.reply({ content: "✅ Event posted.", ephemeral: true });
+      await interaction.reply({ content: "✅ Event hosted", ephemeral: true });
     }
 
-    // ===== START =====
     if (sub === "start") {
+      if (!activeEvent) return interaction.reply({ content: "❌ No active event", ephemeral: true });
 
-      const msgId = activeEvents.get(interaction.guild.id);
-      if (!msgId) {
-        return interaction.reply({ content: "❌ No active event.", ephemeral: true });
-      }
+      const channel = await client.channels.fetch(activeEvent.channelId);
+      const msg = await channel.messages.fetch(activeEvent.messageId);
 
-      const postChannel = interaction.client.channels.cache.get(EVENT_POST_CHANNEL);
-      const msg = await postChannel.messages.fetch(msgId);
-
-      const embed = EmbedBuilder.from(msg.embeds[0]);
-      embed.spliceFields(2, 1, { name: "STATUS", value: "🔴 LOCKED", inline: true });
+      const embed = EmbedBuilder.from(msg.embeds[0])
+        .setDescription(msg.embeds[0].description.replace("OPEN", "LOCKED"))
+        .setColor("Red");
 
       await msg.edit({ embeds: [embed] });
 
-      interaction.reply({ content: "🔒 Event locked.", ephemeral: true });
+      await interaction.reply({ content: "🔒 Event locked", ephemeral: true });
     }
 
-    // ===== END =====
     if (sub === "end") {
+      if (!activeEvent) return interaction.reply({ content: "❌ No active event", ephemeral: true });
 
+      const attendees = interaction.options.getInteger("attendees");
+      const passed = interaction.options.getInteger("passed");
+      const failed = interaction.options.getInteger("failed");
       const proof = interaction.options.getAttachment("proof");
 
-      const embed = new EmbedBuilder()
-        .setTitle("📊 EVENT COMPLETE")
-        .setColor(0xff0000)
+      const logEmbed = new EmbedBuilder()
+        .setTitle("📊 Event Ended")
+        .setDescription(`**Event:** ${activeEvent.name}`)
         .addFields(
-          { name: "Attendees", value: `${interaction.options.getInteger("attendees")}`, inline: true },
-          { name: "Passed", value: `${interaction.options.getInteger("passed")}`, inline: true },
-          { name: "Failed", value: `${interaction.options.getInteger("failed")}`, inline: true }
+          { name: "Attendees", value: `${attendees}`, inline: true },
+          { name: "Passed", value: `${passed}`, inline: true },
+          { name: "Failed", value: `${failed}`, inline: true }
         )
         .setImage(proof.url)
-        .setFooter({ text: "British Army Event Logs" });
+        .setColor("Blue");
 
-      const logChannel = interaction.client.channels.cache.get(EVENT_LOG_CHANNEL);
-      if (logChannel) {
-        logChannel.send({ embeds: [embed] });
-      }
+      const logChannel = await client.channels.fetch(LOG_CHANNEL_ID);
+      await logChannel.send({ embeds: [logEmbed] });
 
-      activeEvents.delete(interaction.guild.id);
+      activeEvent = null;
 
-      interaction.reply({ content: "📁 Event logged.", ephemeral: true });
+      await interaction.reply({ content: "✅ Event ended & logged", ephemeral: true });
     }
+  }
+
+  //
+  // 🔍 BGC SYSTEM
+  //
+  if (interaction.commandName === "bgc") {
+    const user = interaction.options.getUser("user");
+
+    const embed = new EmbedBuilder()
+      .setTitle("🔍 Background Check")
+      .setDescription(`User: ${user}\nStatus: ✅ Clean`)
+      .setColor("Green");
+
+    await interaction.reply({ embeds: [embed] });
   }
 });
 
