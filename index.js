@@ -19,7 +19,7 @@ const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const REQUIRED_ROLE_ID = process.env.REQUIRED_ROLE_ID;
 
 // ================= CONFIG =================
-const BLACKLISTED_GROUPS = [1];
+const BLACKLISTED_GROUPS = [];
 const MAIN_GROUP_ID = 35365203;
 
 const MIN_ACCOUNT_AGE = 60;
@@ -34,7 +34,7 @@ const client = new Client({
 let activeEvent = null;
 
 // ================= SAFETY CHECK =================
-["TOKEN","CLIENT_ID","GUILD_ID"].forEach(v => {
+["TOKEN", "CLIENT_ID", "GUILD_ID"].forEach(v => {
     if (!process.env[v]) {
         console.error(`Missing ENV: ${v}`);
         process.exit(1);
@@ -61,21 +61,54 @@ client.once("ready", async () => {
             .addSubcommand(s =>
                 s.setName("host")
                     .setDescription("Host event")
-                    .addStringOption(o => o.setName("eventname").setRequired(true))
-                    .addStringOption(o => o.setName("cohost").setRequired(true))
-                    .addStringOption(o => o.setName("rules").setRequired(true))
-                    .addStringOption(o => o.setName("invite").setRequired(true))
+                    .addStringOption(o =>
+                        o.setName("eventname")
+                            .setDescription("Event name")
+                            .setRequired(true)
+                    )
+                    .addStringOption(o =>
+                        o.setName("cohost")
+                            .setDescription("Co-host name")
+                            .setRequired(true)
+                    )
+                    .addStringOption(o =>
+                        o.setName("rules")
+                            .setDescription("Event rules")
+                            .setRequired(true)
+                    )
+                    .addStringOption(o =>
+                        o.setName("invite")
+                            .setDescription("Game invite link")
+                            .setRequired(true)
+                    )
             )
             .addSubcommand(s =>
-                s.setName("start").setDescription("Lock event")
+                s.setName("start")
+                    .setDescription("Lock event")
             )
             .addSubcommand(s =>
                 s.setName("end")
                     .setDescription("End event")
-                    .addIntegerOption(o => o.setName("attendees").setRequired(true))
-                    .addStringOption(o => o.setName("passers").setRequired(true))
-                    .addIntegerOption(o => o.setName("failed").setRequired(true))
-                    .addAttachmentOption(o => o.setName("proof").setRequired(true))
+                    .addIntegerOption(o =>
+                        o.setName("attendees")
+                            .setDescription("Number of attendees")
+                            .setRequired(true)
+                    )
+                    .addStringOption(o =>
+                        o.setName("passers")
+                            .setDescription("Who passed")
+                            .setRequired(true)
+                    )
+                    .addIntegerOption(o =>
+                        o.setName("failed")
+                            .setDescription("Number failed")
+                            .setRequired(true)
+                    )
+                    .addAttachmentOption(o =>
+                        o.setName("proof")
+                            .setDescription("Proof image")
+                            .setRequired(true)
+                    )
             )
     ].map(c => c.toJSON());
 
@@ -111,7 +144,6 @@ client.on("interactionCreate", async interaction => {
         });
 
         try {
-            // timeout helper
             const timeout = (p, ms = 8000) =>
                 Promise.race([
                     p,
